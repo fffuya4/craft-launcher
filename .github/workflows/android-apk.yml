@@ -22,7 +22,7 @@ jobs:
       - name: Build
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
-        run: android/build.sh
+        run: bash android/build.sh
       - uses: actions/upload-artifact@v4
         with:
           name: artcraft-launcher-android-arm64
