@@ -12,16 +12,35 @@ pub struct Paths {
     pub cache: PathBuf,
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 const DIR: &str = if cfg!(any(target_os = "macos", target_os = "windows")) { "ArtCraft Launcher" } else { "artcraft-launcher" };
+
+/// The app-private folder Android gives the launcher (`Context.getFilesDir()`), set once at startup
+/// by the Android shell. `dirs` knows no per-user folders on Android.
+#[cfg(target_os = "android")]
+static ANDROID_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Records the Android app's private folder. Later calls are ignored.
+#[cfg(target_os = "android")]
+pub fn set_android_root(root: PathBuf) {
+    let _ = ANDROID_ROOT.set(root);
+}
 
 impl Paths {
     pub fn new() -> Result<Self, String> {
-        if let Some(root) = portable_root() {
-            return Ok(Self::under(&root));
+        #[cfg(target_os = "android")]
+        {
+            ANDROID_ROOT.get().map(|root| Self::under(root)).ok_or_else(|| "the Android app folder isn't known yet".to_string())
         }
-        let data = dirs::data_local_dir().ok_or("no per-user data folder on this system")?.join(DIR);
-        let cache = dirs::cache_dir().ok_or("no per-user cache folder on this system")?.join(DIR);
-        Ok(Self { data, cache })
+        #[cfg(not(target_os = "android"))]
+        {
+            if let Some(root) = portable_root() {
+                return Ok(Self::under(&root));
+            }
+            let data = dirs::data_local_dir().ok_or("no per-user data folder on this system")?.join(DIR);
+            let cache = dirs::cache_dir().ok_or("no per-user cache folder on this system")?.join(DIR);
+            Ok(Self { data, cache })
+        }
     }
 
     /// For tests: everything under one folder.

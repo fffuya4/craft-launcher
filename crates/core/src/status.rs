@@ -26,6 +26,8 @@ pub enum InstallSource {
     AppImage,
     /// A binary found on `PATH` or in a system prefix.
     Binary,
+    /// An app installed through Android's package installer (found by its package name).
+    AndroidApp,
 }
 
 impl InstallSource {
@@ -40,13 +42,14 @@ impl InstallSource {
             Self::Flatpak => "Flatpak",
             Self::AppImage => "AppImage",
             Self::Binary => "System binary",
+            Self::AndroidApp => "Android app",
         }
     }
 
     /// Whether the launcher may replace or remove this copy itself. Packages owned by a system
     /// package manager (deb, rpm, Flatpak) are updated through that manager instead.
     pub fn launcher_can_update(self) -> bool {
-        matches!(self, Self::Launcher | Self::MacApp | Self::Msi | Self::AppImage)
+        matches!(self, Self::Launcher | Self::MacApp | Self::Msi | Self::AppImage | Self::AndroidApp)
     }
 }
 

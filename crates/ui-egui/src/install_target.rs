@@ -22,6 +22,7 @@ fn platform_kinds(os: Os) -> &'static [PackageKind] {
         Os::Windows => &[PackageKind::Msi, PackageKind::PortableZip],
         Os::MacOs => &[PackageKind::Dmg],
         Os::FreeBsd => &[PackageKind::TarGz],
+        Os::Android => &[PackageKind::Apk],
         Os::Linux => &[],
     }
 }

@@ -46,13 +46,16 @@ fn to_update_release(release: &Release) -> craft_update::Release {
     }
 }
 
-fn to_update_platform(platform: Platform) -> craft_update::Platform {
-    craft_update::Platform {
+/// `None` on Android: `craft-update` replaces desktop executables and has no Android flow, so the
+/// Android launcher is updated like any other Android app, from its release's `.apk`.
+fn to_update_platform(platform: Platform) -> Option<craft_update::Platform> {
+    Some(craft_update::Platform {
         os: match platform.os {
             artcraft_launcher_core::Os::Windows => craft_update::Os::Windows,
             artcraft_launcher_core::Os::MacOs => craft_update::Os::MacOs,
             artcraft_launcher_core::Os::Linux => craft_update::Os::Linux,
             artcraft_launcher_core::Os::FreeBsd => craft_update::Os::FreeBsd,
+            artcraft_launcher_core::Os::Android => return None,
         },
         arch: match platform.arch {
             artcraft_launcher_core::Arch::X64 => craft_update::Arch::X64,
@@ -60,7 +63,7 @@ fn to_update_platform(platform: Platform) -> craft_update::Platform {
             artcraft_launcher_core::Arch::X86 => craft_update::Arch::X86,
             artcraft_launcher_core::Arch::Riscv64 => craft_update::Arch::Riscv64,
         },
-    }
+    })
 }
 
 /// Whether `release` is the version this launcher just updated itself to.
@@ -91,7 +94,9 @@ pub fn update(
     last: &dyn Fn() -> Result<(), String>,
 ) -> Result<(), String> {
     let update_release = to_update_release(release);
-    let update_platform = to_update_platform(platform);
+    let Some(update_platform) = to_update_platform(platform) else {
+        return Err("ArtCraft Launcher can't update itself on this system. Install the new version from the release page.".into());
+    };
     let update_paths = to_update_paths(paths);
     let update_http = craft_update::Http::new("ArtCraft-Launcher/SelfUpdate")?;
     let mut update_phase = |p: craft_update::JobPhase| {

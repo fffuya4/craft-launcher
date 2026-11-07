@@ -16,6 +16,7 @@ pub enum Os {
     MacOs,
     Linux,
     FreeBsd,
+    Android,
 }
 
 impl Os {
@@ -25,6 +26,7 @@ impl Os {
             Self::MacOs => "macOS",
             Self::Linux => "Linux",
             Self::FreeBsd => "FreeBSD",
+            Self::Android => "Android",
         }
     }
 }
@@ -65,6 +67,8 @@ pub enum PackageKind {
     Flatpak,
     /// Linux or FreeBSD tarball (`bin/<app>`, `share/…`).
     TarGz,
+    /// Android package (`.apk`), installed through the system package installer.
+    Apk,
 }
 
 impl PackageKind {
@@ -79,6 +83,7 @@ impl PackageKind {
             Self::ArchPkg => "Arch package (.pkg.tar.zst)",
             Self::Flatpak => "Flatpak bundle",
             Self::TarGz => "Tarball (.tar.gz)",
+            Self::Apk => "Android package (.apk)",
         }
     }
 
@@ -93,6 +98,7 @@ impl PackageKind {
             Self::ArchPkg => ".pkg.tar.zst",
             Self::Flatpak => ".flatpak",
             Self::TarGz => ".tar.gz",
+            Self::Apk => ".apk",
         }
     }
 }
@@ -115,6 +121,8 @@ impl Platform {
             Os::Linux
         } else if cfg!(target_os = "freebsd") {
             Os::FreeBsd
+        } else if cfg!(target_os = "android") {
+            Os::Android
         } else {
             return None;
         };
@@ -158,6 +166,9 @@ impl Platform {
             (Os::FreeBsd, Arch::X64) => &["freebsd-x86_64"],
             (Os::FreeBsd, Arch::Arm64) => &["freebsd-aarch64"],
             (Os::FreeBsd, _) => &[],
+            (Os::Android, Arch::Arm64) => &["android-arm64", "android-aarch64", "android-universal"],
+            (Os::Android, Arch::X64) => &["android-x86_64", "android-x64", "android-universal"],
+            (Os::Android, _) => &["android-universal"],
         }
     }
 
@@ -168,6 +179,7 @@ impl Platform {
             Os::MacOs => &[PackageKind::Dmg],
             Os::Linux => &[PackageKind::AppImage, PackageKind::TarGz],
             Os::FreeBsd => &[PackageKind::TarGz],
+            Os::Android => &[PackageKind::Apk],
         }
     }
 
@@ -178,6 +190,7 @@ impl Platform {
             Os::MacOs => &[PackageKind::Dmg],
             Os::Linux => &[PackageKind::AppImage, PackageKind::Deb, PackageKind::Rpm, PackageKind::ArchPkg, PackageKind::Flatpak, PackageKind::TarGz],
             Os::FreeBsd => &[PackageKind::TarGz],
+            Os::Android => &[PackageKind::Apk],
         }
     }
 }
@@ -217,7 +230,7 @@ fn strip_stem_prefix<'a>(base: &'a str, stem: &str, sep: char) -> Option<&'a str
 /// Reads `<stem>-<version>-<os>-<arch>[-portable].<ext>` or Studio's `<Stem>_<version>_<arch>[_<locale>].<ext>`;
 /// `None` for checksums, zsync files, CLI and web bundles, or anything else.
 pub fn parse_asset_name(name: &str, stems: &[&str]) -> Option<AssetName> {
-    const KINDS: [PackageKind; 9] = [
+    const KINDS: [PackageKind; 10] = [
         PackageKind::PortableZip,
         PackageKind::TarGz,
         PackageKind::Msi,
@@ -227,6 +240,7 @@ pub fn parse_asset_name(name: &str, stems: &[&str]) -> Option<AssetName> {
         PackageKind::Rpm,
         PackageKind::ArchPkg,
         PackageKind::Flatpak,
+        PackageKind::Apk,
     ];
     let (kind, base) = KINDS.iter().find_map(|k| name.strip_suffix(k.suffix()).map(|b| (*k, b)))?;
     for stem in stems {
@@ -527,5 +541,22 @@ mod tests {
         for kind in [PackageKind::AppImage, PackageKind::Deb, PackageKind::Rpm, PackageKind::ArchPkg, PackageKind::Flatpak, PackageKind::TarGz] {
             assert_eq!(pick_asset(&arm_only_release, &["photocraft"], p_x64, &[kind]), None, "x86_64 must never match an aarch64 asset for {kind:?}");
         }
+    }
+
+    #[test]
+    fn android_picks_its_apk_and_nothing_else() {
+        let r = release(&[
+            "photocraft-0.5.0-android-arm64.apk",
+            "photocraft-0.5.0-android-x86_64.apk",
+            "photocraft-0.5.0-linux-aarch64.AppImage",
+            "photocraft-0.5.0-windows-x64.msi",
+        ]);
+        let arm = Platform { os: Os::Android, arch: Arch::Arm64 };
+        let (asset, kind) = pick_asset(&r, &["photocraft"], arm, arm.default_kinds()).unwrap();
+        assert_eq!((asset.name.as_str(), kind), ("photocraft-0.5.0-android-arm64.apk", PackageKind::Apk));
+        let x64 = Platform { os: Os::Android, arch: Arch::X64 };
+        assert_eq!(pick_asset(&r, &["photocraft"], x64, x64.default_kinds()).unwrap().0.name, "photocraft-0.5.0-android-x86_64.apk");
+        let desktop_only = release(&["photocraft-0.5.0-linux-aarch64.AppImage"]);
+        assert!(pick_asset(&desktop_only, &["photocraft"], arm, arm.default_kinds()).is_none());
     }
 }

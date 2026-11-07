@@ -244,6 +244,8 @@ pub fn install_at(
         PackageKind::TarGz => freebsd::install_tree(app, &file, job.paths).map(|(bin, files, root)| Some(record(&version, kind, bin, files, root))),
         #[cfg(target_os = "linux")]
         PackageKind::TarGz => linux::install_tree(app, &file, job.paths).map(|path| Some(record(&version, kind, path, Vec::new(), false))),
+        #[cfg(target_os = "android")]
+        PackageKind::Apk => crate::android::install_apk(app, &file, existing).map(|()| None),
         other => Err(format!("{} isn't supported on this system", other.label())),
     };
     match &result {
@@ -575,6 +577,7 @@ pub(crate) fn choose_kinds_with(
             InstallSource::Flatpak => Some(PackageKind::Flatpak),
             InstallSource::AppImage => Some(PackageKind::AppImage),
             InstallSource::Binary => Some(PackageKind::TarGz),
+            InstallSource::AndroidApp => Some(PackageKind::Apk),
         };
         if let Some(k) = kind.filter(|k| available.contains(k) || (*k == PackageKind::ArchPkg && can_pacman)) {
             return vec![k];
@@ -615,6 +618,8 @@ pub fn available_kinds() -> Vec<PackageKind> {
     return linux::available_kinds();
     #[cfg(target_os = "freebsd")]
     return vec![PackageKind::TarGz];
+    #[cfg(target_os = "android")]
+    return vec![PackageKind::Apk];
     #[allow(unreachable_code)]
     Vec::new()
 }
@@ -772,6 +777,8 @@ pub fn uninstall(
         },
         #[cfg(target_os = "linux")]
         InstallSource::AppImage => remove_appimage(app, &path, record),
+        #[cfg(target_os = "android")]
+        InstallSource::AndroidApp => crate::android::uninstall(app, installed),
         // A tarball the launcher unpacked into its own folder: take the tree out and leave the
         // app's settings (`home/`) alone, so a reinstall finds its projects where they were.
         #[cfg(target_os = "linux")]
@@ -821,6 +828,8 @@ pub fn launch(app: &CraftApp, installed: &Installed, paths: &Paths, args: &[Stri
             cmd.args(args);
             process::spawn_detached(cmd)
         }
+        #[cfg(target_os = "android")]
+        InstallSource::AndroidApp => crate::android::launch(app, installed),
         // `open` starts the app through Launch Services, which gives it the user's real home, so
         // it finds the file at its default path; not every macOS `open` takes an environment.
         InstallSource::MacApp => process::open_app(path, args),

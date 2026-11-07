@@ -48,6 +48,8 @@ pub fn detect(app: &CraftApp, manifest: &Manifest, snapshot: &Snapshot) -> Optio
     return linux::detect(app, snapshot);
     #[cfg(target_os = "freebsd")]
     return freebsd::detect(app);
+    #[cfg(target_os = "android")]
+    return crate::android::detect(app);
     #[allow(unreachable_code)]
     None
 }

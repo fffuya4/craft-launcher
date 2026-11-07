@@ -61,12 +61,38 @@ pub fn is_loopback(url: &str) -> bool {
     matches!(host, "127.0.0.1" | "localhost" | "[::1]") && !port.is_empty() && port.parse::<u16>().is_ok()
 }
 
+/// The system's trusted roots, read once from the folder Android keeps them in: the Conscrypt
+/// module's (updated through Google Play system updates) first, then the base system's.
+#[cfg(target_os = "android")]
+fn android_roots() -> ureq::tls::RootCerts {
+    use std::sync::OnceLock;
+    static ROOTS: OnceLock<Option<Vec<ureq::tls::Certificate<'static>>>> = OnceLock::new();
+    let roots = ROOTS.get_or_init(|| {
+        for dir in ["/apex/com.android.conscrypt/cacerts", "/system/etc/security/cacerts"] {
+            let loaded = rustls_native_certs::load_certs_from_paths(None, Some(std::path::Path::new(dir)));
+            if !loaded.certs.is_empty() {
+                return Some(loaded.certs.iter().map(|der| ureq::tls::Certificate::from_der(der.as_ref()).to_owned()).collect());
+            }
+        }
+        None
+    });
+    match roots {
+        Some(certs) => ureq::tls::RootCerts::new_with_certs(certs),
+        None => ureq::tls::RootCerts::PlatformVerifier,
+    }
+}
+
 impl Http {
     pub fn new() -> Result<Self, String> {
         // The OS checks each certificate chain itself: Windows fetches roots it hasn't stored yet
         // and trusts what antivirus HTTPS scanning installs. Reading the store ourselves missed
         // both ("invalid peer certificate: UnknownIssuer").
+        #[cfg(not(target_os = "android"))]
         let tls = || ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
+        // Android: rustls-platform-verifier needs a Java component this build doesn't ship, so the
+        // system's own trust store is read from its folder instead (see `android_roots`).
+        #[cfg(target_os = "android")]
+        let tls = || ureq::tls::TlsConfig::builder().root_certs(android_roots()).build();
         // Chosen once: the proxy environment variables, else the OS proxy setting.
         let proxy = crate::proxy::pick();
         let small = ureq::Agent::config_builder()

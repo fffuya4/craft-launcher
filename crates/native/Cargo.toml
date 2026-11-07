@@ -50,3 +50,8 @@ zip = { version = "9", default-features = false, features = ["deflate"] }
 winsafe = { version = "0.0.29", features = ["kernel", "version", "advapi"] }
 # Authenticode checks through WinTrust: the update helper installs only files from the launcher's publisher.
 verifysign = "1"
+
+# Android has no per-user folders for `dirs` and no Java component for rustls-platform-verifier,
+# so the system trust store is read from its folder (http.rs). Already in Cargo.lock.
+[target.'cfg(target_os = "android")'.dependencies]
+rustls-native-certs = "0.8"
