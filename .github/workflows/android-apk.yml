@@ -1,8 +1,16 @@
-# Builds the Android APK of ArtCraft Launcher. For a fork: Actions → "Android APK" → Run workflow,
-# then download the artifact. (Upstream CI is shared; this file isn't part of that.)
+# Builds the Android APK of ArtCraft Launcher. For a fork: Actions → "Android APK" → Run workflow.
+# With "Publish" ticked (the default) the APK is also published as a release of this fork.
+# (Upstream CI is shared; this file isn't part of that.)
 name: Android APK
+permissions:
+  contents: write
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the APK as a release of this fork"
+        type: boolean
+        default: true
   push:
     tags: ["android-v*"]
 jobs:
@@ -30,3 +38,15 @@ jobs:
         with:
           name: artcraft-launcher-android-arm64
           path: android/build/artcraft-launcher-*-android-arm64.apk
+      - name: Publish release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          cd android/build
+          apk="artcraft-launcher-$version-android-arm64.apk"
+          sha256sum "$apk" > SHA256SUMS.txt
+          gh release create "v$version" "$apk" SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" \
+            --title "ArtCraft Launcher $version (Android)" --notes "Android build of ArtCraft Launcher $version." \
+            || gh release upload "v$version" "$apk" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
