@@ -155,7 +155,7 @@ pub const SUITE: [CraftApp; 18] = [
         ..app("artcraft", "ArtCraft Studio", "AI image and video creation", [[47, 123, 245], [26, 91, 196], [127, 176, 255]], "storytold/artcraft")
     },
     app("photocraft", "PhotoCraft", "Image editing", [[0x2f, 0x7b, 0xf5], [0x1a, 0x5b, 0xc4], [0x7f, 0xb0, 0xff]], "storytold/photocraft"),
-    app("vectorcraft", "VectorCraft", "Vector illustration", [[0xe8, 0x57, 0x3f], [0xb8, 0x3a, 0x24], [0xff, 0x8a, 0x70]], "storytold/vectorcraft"),
+    app("vectorcraft", "VectorCraft", "Vector illustration", [[0xe8, 0x57, 0x3f], [0xb8, 0x3a, 0x24], [0xff, 0x8a, 0x70]], "fffuya4/vectorcraft"),
     app(
         "filmcraft",
         "FilmCraft",
@@ -364,6 +364,8 @@ mod tests {
                 assert_eq!(a.name.to_lowercase().replace(' ', "-"), a.id);
             }
             match a.kind {
+                // This fork installs VectorCraft's Android build from the fork's own releases.
+                AppKind::Official if a.id == "vectorcraft" => assert_eq!(a.repo, "fffuya4/vectorcraft"),
                 AppKind::Official => assert_eq!(a.repo, format!("storytold/{}", a.id)),
                 AppKind::Community => assert!(!a.repo.starts_with("storytold/"), "{} is community", a.id),
             }
