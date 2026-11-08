@@ -19,9 +19,6 @@ use crate::widgets::{self, Kind};
 /// The byline that says who makes an app: "by ArtCraft" or "by <publisher>". Official apps take
 /// the accent colour, community apps the muted one.
 fn kind_badge(ui: &mut Ui, app: &artcraft_launcher_core::CraftApp, t: &Tokens) {
-    if app.id == "artcraft" {
-        return;
-    }
     let text = fmt(tl!("by {name}"), &[("name", app.publisher)]);
     let color = match app.kind {
         AppKind::Official => t.accent_ink,
@@ -207,9 +204,19 @@ impl LauncherUi {
         }
         let t = Tokens::get(ui.ctx());
         if self.dialog.is_none()
+            && let Some(r) = self.port_update.clone()
+        {
+            self.launcher_update_banner(ui, &t, &r, true);
+            ui.add_space(14.0);
+        }
+        if self.dialog.is_none()
             && let Some(r) = self.launcher_update.clone()
         {
-            self.launcher_update_banner(ui, &t, &r);
+            if self.port.is_some() {
+                self.port_behind_banner(ui, &t, &r);
+            } else {
+                self.launcher_update_banner(ui, &t, &r, false);
+            }
             ui.add_space(14.0);
         }
         self.announcements(ui);
@@ -222,7 +229,7 @@ impl LauncherUi {
 
     /// A banner over the toolbar when a newer ArtCraft Launcher release is known: either the
     /// update-in-place controls, or a plain link when this build can't update itself.
-    fn launcher_update_banner(&mut self, ui: &mut Ui, t: &Tokens, r: &artcraft_launcher_core::Release) {
+    fn launcher_update_banner(&mut self, ui: &mut Ui, t: &Tokens, r: &artcraft_launcher_core::Release, of_port: bool) {
         egui::Frame::new()
             .fill(tint(t.accent, if t.dark { 0.10 } else { 0.07 }))
             .stroke(Stroke::new(1.0, tint(t.accent, 0.6)))
@@ -231,19 +238,57 @@ impl LauncherUi {
                 ui.horizontal(|ui| {
                     widgets::tag(ui, tl!("Update"), t.accent, Color32::WHITE);
                     ui.add_space(4.0);
+                    let text = if of_port {
+                        format!("An update of this ArtCraft Launcher port is available ({}).", port_label(&r.tag))
+                    } else {
+                        fmt(tl!("ArtCraft Launcher {version} is available."), &[("version", &r.version_label())])
+                    };
+                    ui.label(RichText::new(text).family(theme::medium()).color(t.ink_strong));
+                    self.banner_actions(ui, t, r, of_port);
+                });
+            });
+    }
+
+    /// Shown when this launcher is a port and the original has a newer release: the port still
+    /// uses an older launcher, which only the port's developer can change.
+    fn port_behind_banner(&mut self, ui: &mut Ui, t: &Tokens, r: &artcraft_launcher_core::Release) {
+        let (original, ours) = (r.version_label(), env!("CARGO_PKG_VERSION"));
+        let report = self.port.as_ref().map(|p| {
+            let title = format!("Update to ArtCraft Launcher {original}");
+            let body = format!("The original ArtCraft Launcher {original} is out ({}). This port still uses {ours}.", r.html_url);
+            format!("{}?title={}&body={}", p.report_url, percent_encode(&title), percent_encode(&body))
+        });
+        egui::Frame::new()
+            .fill(tint(t.warn, if t.dark { 0.12 } else { 0.08 }))
+            .stroke(Stroke::new(1.0, tint(t.warn, 0.6)))
+            .inner_margin(egui::Margin::symmetric(16, 10))
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    widgets::tag(ui, "Notice", t.warn, Color32::WHITE);
+                    ui.add_space(4.0);
                     ui.label(
-                        RichText::new(fmt(tl!("ArtCraft Launcher {version} is available."), &[("version", &r.version_label())]))
-                            .family(theme::medium())
-                            .color(t.ink_strong),
+                        RichText::new(format!(
+                            "The original ArtCraft Launcher {original} is out. This port still uses an older version ({ours}). Please tell the port's developer about it."
+                        ))
+                        .family(theme::medium())
+                        .color(t.ink_strong),
                     );
-                    self.banner_actions(ui, t, r);
+                    if let Some(url) = &report
+                        && widgets::button(ui, "Tell the developer", Kind::Primary, 0.0).clicked()
+                    {
+                        widgets::open_external_link(ui.ctx(), url);
+                    }
+                    widgets::hud_link(ui, tl!("What's new"), &r.html_url);
+                    if widgets::glyph_button(ui, widgets::Glyph::Close, tl!("Dismiss")).clicked() {
+                        self.launcher_update = None;
+                    }
                 });
             });
     }
 
     /// The banner's right side: the download's progress and cancel while it runs, otherwise the
     /// update (or download) buttons plus the release link.
-    fn banner_actions(&mut self, ui: &mut Ui, t: &Tokens, r: &artcraft_launcher_core::Release) {
+    fn banner_actions(&mut self, ui: &mut Ui, t: &Tokens, r: &artcraft_launcher_core::Release, of_port: bool) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(phase) = self.launcher_job {
                 let (fraction, caption) = match phase {
@@ -268,9 +313,13 @@ impl LauncherUi {
                 return;
             }
             if widgets::glyph_button(ui, widgets::Glyph::Close, tl!("Dismiss")).clicked() {
-                self.launcher_update = None;
+                if of_port {
+                    self.port_update = None;
+                } else {
+                    self.launcher_update = None;
+                }
             }
-            if self.caps.self_update {
+            if of_port || self.caps.self_update {
                 if widgets::button(ui, tl!("Update and restart"), Kind::Primary, 0.0)
                     .on_hover_text(tl!("Downloads the new version, replaces this one and opens it again"))
                     .clicked()
@@ -500,7 +549,11 @@ impl LauncherUi {
     // ---- grid ----------------------------------------------------------------------------
 
     /// Pinned apps first (user order), then installed, then the rest under a "Not installed" header.
+    /// A port groups them by what can be installed on its system instead.
     pub(crate) fn grid(&mut self, ui: &mut Ui, ids: &[&'static str]) {
+        if self.port.is_some() {
+            return self.grid_by_availability(ui, ids);
+        }
         let pinned_n = ids.iter().take_while(|id| self.settings.is_pinned(id)).count();
         let (pinned, rest) = ids.split_at(pinned_n);
         if !pinned.is_empty() {
@@ -522,6 +575,49 @@ impl LauncherUi {
             ui.add_space(12.0);
         }
         self.grid_block(ui, rest);
+        ui.add_space(24.0);
+    }
+
+    /// Pinned apps first, then three groups: installed, available for this system, and not
+    /// available for it (nothing is published for it, or nothing at all yet).
+    fn grid_by_availability(&mut self, ui: &mut Ui, ids: &[&'static str]) {
+        let t = Tokens::get(ui.ctx());
+        let system = self.port.as_ref().map(|p| p.system.clone()).unwrap_or_default();
+        let pinned_n = ids.iter().take_while(|id| self.settings.is_pinned(id)).count();
+        let (pinned, rest) = ids.split_at(pinned_n);
+        let group = |this: &Self, id: &str| match this.entry(id).map(|e| e.status(this.platform, this.caps.manage_apps)) {
+            Some(AppStatus::UpToDate | AppStatus::UpdateAvailable | AppStatus::Installed) => 0,
+            Some(AppStatus::Unavailable | AppStatus::NoRelease) => 2,
+            _ => 1,
+        };
+        let mut sections: [(String, Vec<&'static str>); 3] = [
+            ("Installed".to_string(), Vec::new()),
+            (format!("Available for {system}"), Vec::new()),
+            (format!("Not available for {system}"), Vec::new()),
+        ];
+        for id in rest {
+            let g = group(self, id);
+            sections[g].1.push(id);
+        }
+        let mut first = true;
+        if !pinned.is_empty() {
+            widgets::hud(ui, tl!("Pinned"), t.faint);
+            ui.add_space(12.0);
+            self.grid_block(ui, pinned);
+            first = false;
+        }
+        for (title, list) in sections {
+            if list.is_empty() {
+                continue;
+            }
+            if !first {
+                ui.add_space(28.0);
+            }
+            first = false;
+            widgets::hud(ui, &format!("{title} · {}", list.len()), t.faint);
+            ui.add_space(12.0);
+            self.grid_block(ui, &list);
+        }
         ui.add_space(24.0);
     }
 
@@ -1529,4 +1625,24 @@ mod tests {
         let url = launcher_download(&release(), platform(), false).unwrap();
         assert_eq!(url, format!("https://dl.example/{LAUNCHER_ID}-0.4.1-linux-x86_64.AppImage"));
     }
+}
+
+/// `android-v0.16.1-r2` as `0.16.1, revision 2`; any other tag as it is.
+fn port_label(tag: &str) -> String {
+    tag.strip_prefix("android-v")
+        .and_then(|rest| rest.rsplit_once("-r"))
+        .map_or_else(|| tag.to_string(), |(base, revision)| format!("{base}, revision {revision}"))
+}
+
+/// Text made safe for a URL's query: everything but letters, digits and `-_.~` as `%XX`.
+fn percent_encode(text: &str) -> String {
+    let mut out = String::new();
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) {
+            out.push(char::from(byte));
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }

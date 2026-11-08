@@ -136,6 +136,15 @@ impl Dialog {
     }
 }
 
+/// What the UI needs to know about a port of the launcher.
+#[derive(Clone, Debug)]
+pub struct PortInfo {
+    /// The system the port runs on, as the groups name it (`Android`).
+    pub system: String,
+    /// Where to tell the port's developer about something (a page that starts a new issue).
+    pub report_url: String,
+}
+
 pub struct LauncherUi {
     pub(crate) backend: Box<dyn Backend>,
     pub settings: Settings,
@@ -146,6 +155,10 @@ pub struct LauncherUi {
     pub(crate) last_source: Option<Source>,
     pub(crate) rate_limited_until: Option<i64>,
     pub(crate) launcher_update: Option<Release>,
+    /// Set when this launcher is a port made by someone else (see [`PortInfo`]).
+    pub(crate) port: Option<PortInfo>,
+    /// A newer release of the port itself, from the port's own repository.
+    pub(crate) port_update: Option<Release>,
     pub(crate) version_lists: std::collections::HashMap<String, Result<Vec<Release>, String>>,
     pub(crate) version_requests: std::collections::HashSet<String>,
     /// While the Choose version dialog is open: its app and the choice it had before, put back
@@ -267,6 +280,8 @@ impl LauncherUi {
             last_source: None,
             rate_limited_until: None,
             launcher_update: None,
+            port: None,
+            port_update: None,
             version_lists: std::collections::HashMap::new(),
             version_requests: std::collections::HashSet::new(),
             version_before: None,
@@ -306,6 +321,14 @@ impl LauncherUi {
     /// Moves the UI to another window's context: fonts, image loaders, the theme and the animation
     /// timings belong to a context, and toasts and the next look at the OS's animation setting are
     /// timed on its clock.
+    /// Marks this launcher as a port of the original made by someone else: the original's newer
+    /// releases are then reported as "this port is behind" (to tell the port's developer) instead
+    /// of an update to install, the port's own releases get their own banner, and the apps are
+    /// grouped by whether they can be installed on this system.
+    pub fn set_port(&mut self, port: Option<PortInfo>) {
+        self.port = port;
+    }
+
     pub fn attach(&mut self, ctx: &egui::Context) {
         theme::install_fonts(ctx, self.cjk_font);
         egui_extras::install_image_loaders(ctx);
@@ -615,6 +638,11 @@ impl LauncherUi {
                 true
             }
             Event::LauncherUpdate(r) => self.on_launcher_update(r),
+            Event::PortUpdate(r) => {
+                let fresh = self.port_update.as_ref().is_none_or(|cur| cur.tag != r.tag);
+                self.port_update = Some(r);
+                fresh
+            }
             Event::CheckStarted => {
                 self.checking = true;
                 false
@@ -688,7 +716,8 @@ impl LauncherUi {
         let fresh = self.launcher_update.as_ref().is_none_or(|cur| cur.version != r.version);
         self.launcher_update = Some(r.clone());
         let automatic = self.settings.auto_update && self.caps.self_update;
-        if fresh && !automatic && self.dialog.is_none() && self.launcher_job.is_none() {
+        // A port can't install the original's release; its banner says so instead of a dialog.
+        if fresh && !automatic && self.port.is_none() && self.dialog.is_none() && self.launcher_job.is_none() {
             self.dialog = Some(Dialog::LauncherUpdate(r));
         }
         fresh

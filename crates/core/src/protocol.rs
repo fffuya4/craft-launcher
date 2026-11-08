@@ -211,6 +211,9 @@ pub enum Event {
     },
     /// The latest ArtCraft Launcher release, when it's newer than this one.
     LauncherUpdate(Release),
+    /// A newer release of this launcher's own Android port, from the port's repository (see
+    /// `artcraft_launcher_native::android::PORT_REPO`).
+    PortUpdate(Release),
     /// The new launcher is in place (or will be, once this one exits): quit now so it can start.
     LauncherRestarting,
     /// News and alerts from ArtCraft's release feed (replaces any earlier set).

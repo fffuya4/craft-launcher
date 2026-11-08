@@ -76,6 +76,9 @@ struct Shared {
     last_check: Mutex<Option<i64>>,
     /// The newer ArtCraft Launcher release, once a check has found one.
     launcher_release: Mutex<Option<Release>>,
+    /// The newer release of this launcher's Android port, once a check has found one.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    port_release: Mutex<Option<Release>>,
     /// How this launcher is installed, when it can replace itself. Worked out on the check thread
     /// just before a newer launcher is announced: finding out can ask the host's Flatpak, which
     /// mustn't hold up the first frame.
@@ -219,6 +222,7 @@ impl NativeBackend {
             checking: AtomicBool::new(false),
             detecting: AtomicBool::new(false),
             launcher_release: Mutex::new(None),
+            port_release: Mutex::new(None),
             self_install: OnceLock::new(),
             github_asked: Mutex::new(HashMap::new()),
             answered: Mutex::new(std::collections::HashSet::new()),
@@ -344,6 +348,8 @@ impl NativeBackend {
                 SUITE.iter().filter(|a| platform.is_none_or(|p| a.runs_on(p.os))).chain(std::iter::once(&LAUNCHER)).collect::<Vec<&CraftApp>>(),
             );
             let sources = sweep(&queue, &mirror, feed.as_ref(), fallback, &source, &shared, &paths, (platform, &options), force, now);
+            #[cfg(target_os = "android")]
+            check_port(source.as_ref(), &shared);
             source.save();
             {
                 let answered = shared.answered.lock().unwrap_or_else(PoisonError::into_inner);
@@ -461,6 +467,9 @@ impl NativeBackend {
 
     /// Downloads the newer launcher, puts it in place and asks the UI to quit so it can start.
     fn update_launcher(&self) {
+        #[cfg(target_os = "android")]
+        return self.update_port();
+        #[allow(unreachable_code)]
         let id = LAUNCHER_ID.to_string();
         let (Some(install), Some(platform)) = (self.shared.self_install.get().cloned().flatten(), self.platform) else {
             self.shared.emit(Event::JobFinished {
@@ -507,6 +516,47 @@ impl NativeBackend {
                     shared.emit(Event::JobFinished { app: LAUNCHER_ID.to_string(), result: Err(e) });
                 }
             }
+        });
+    }
+
+    /// Android: downloads the newer port release's package, checks it, and hands it to the
+    /// system installer (which replaces this app once the person confirms).
+    #[cfg(target_os = "android")]
+    fn update_port(&self) {
+        let id = LAUNCHER_ID.to_string();
+        let fail = |why: &str| self.shared.emit(Event::JobFinished { app: LAUNCHER_ID.to_string(), result: Err(why.to_string()) });
+        let Some(release) = self.shared.port_release.lock().unwrap_or_else(PoisonError::into_inner).clone() else { return };
+        let Some(asset) = crate::android::port_asset(&release).cloned() else { return fail("this release has no Android package") };
+        let Some(sha) = asset.sha256.clone() else { return fail("this release has no checksum, so it can't be checked") };
+        if !artcraft_launcher_core::release::valid_file_name(&asset.name) {
+            return fail("this release's file name isn't valid");
+        }
+        let Some(http) = self.http.clone() else { return fail("secure connections aren't available on this system") };
+        let stop = Arc::new(Stop::default());
+        {
+            let mut jobs = self.shared.jobs.lock().unwrap_or_else(PoisonError::into_inner);
+            if jobs.contains_key(&id) {
+                return;
+            }
+            jobs.insert(id.clone(), stop.clone());
+        }
+        let job = JobGuard { shared: self.shared.clone(), app_id: id };
+        let (shared, paths) = (self.shared.clone(), self.paths.clone());
+        std::thread::spawn(move || {
+            let job = job;
+            let phase = |p: JobPhase| shared.emit(Event::Progress { app: LAUNCHER_ID.to_string(), phase: p });
+            let dest = install::download_path(&paths, &asset);
+            let downloaded = http.download(&asset.url, &dest, asset.size, &sha, &stop, &mut |t| match t {
+                http::Transfer::Bytes { done, total } => phase(JobPhase::Downloading { done, total }),
+                http::Transfer::Reconnecting { done, total } => phase(JobPhase::Reconnecting { done, total }),
+            });
+            phase(JobPhase::Verifying);
+            let result = downloaded.and_then(|()| {
+                phase(JobPhase::Installing);
+                crate::android::install_file(&dest)
+            });
+            drop(job);
+            shared.emit(Event::JobFinished { app: LAUNCHER_ID.to_string(), result: result.map(|()| "The update is installed.".to_string()) });
         });
     }
 
@@ -1049,6 +1099,17 @@ fn check_app(app: &'static CraftApp, latest: Option<LatestRelease>, from: Origin
         shared.answered.lock().unwrap_or_else(PoisonError::into_inner).insert(app.id.to_string());
     }
     publish_latest(app, latest, from, shared, platform);
+}
+
+/// Android: asks GitHub for the port's own latest release and offers it when it's newer than the
+/// running copy.
+#[cfg(target_os = "android")]
+fn check_port(source: &dyn ReleaseSource, shared: &Arc<Shared>) {
+    let LatestRelease::Found(release) = source.latest(crate::android::PORT_REPO, false).latest else { return };
+    if crate::android::port_is_newer(&release.tag) {
+        *shared.port_release.lock().unwrap_or_else(PoisonError::into_inner) = Some(release.clone());
+        shared.emit(Event::PortUpdate(release));
+    }
 }
 
 /// Offers the launcher's own update when its answer is a newer release than the running one.
@@ -1678,6 +1739,7 @@ mod tests {
             detecting: AtomicBool::new(false),
             last_check: Mutex::new(None),
             launcher_release: Mutex::new(None),
+            port_release: Mutex::new(None),
             self_install: OnceLock::new(),
             github_asked: Mutex::new(HashMap::new()),
             answered: Mutex::new(std::collections::HashSet::new()),

@@ -1,14 +1,17 @@
 package ai.storyteller.artcraft.launcher;
 
 import android.app.PendingIntent;
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
+import android.graphics.Insets;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
+import android.view.WindowInsets;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -127,13 +130,86 @@ public final class PackageHelper {
         }
     }
 
-    /** Asks the system to remove a package; it shows its own confirmation. */
-    public static String uninstall(Context context, String pkg) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + pkg));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
+    static final int REQ_UNINSTALL = 7;
+    private static final long UNINSTALL_TIMEOUT_MINUTES = 10;
+    private static volatile Outcome uninstallOutcome;
+    private static volatile String uninstallPackage;
+
+    /** Asks the system to remove a package and waits for the person's answer to its prompt. */
+    public static String uninstall(final Context context, final String pkg) {
+        final Activity a = MainActivity.current;
+        if (a == null) {
+            return "err:the window isn't ready";
+        }
+        if (!isInstalled(context, pkg)) {
             return "ok:";
+        }
+        final Outcome outcome = new Outcome();
+        uninstallOutcome = outcome;
+        uninstallPackage = pkg;
+        a.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + pkg));
+                    intent.putExtra(Intent.EXTRA_RETURN_RESULT, true);
+                    a.startActivityForResult(intent, REQ_UNINSTALL);
+                } catch (RuntimeException e) {
+                    outcome.answer = "err:" + e;
+                    outcome.done.countDown();
+                }
+            }
+        });
+        try {
+            if (!outcome.done.await(UNINSTALL_TIMEOUT_MINUTES, TimeUnit.MINUTES)) {
+                return "err:the system didn't answer in time";
+            }
+            return outcome.answer;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "err:interrupted";
+        } finally {
+            uninstallOutcome = null;
+        }
+    }
+
+    /** The activity's answer to the uninstall prompt: what counts is whether the package is gone. */
+    static void onUninstallResult(Context context) {
+        Outcome outcome = uninstallOutcome;
+        String pkg = uninstallPackage;
+        if (outcome == null || pkg == null) {
+            return;
+        }
+        outcome.answer = isInstalled(context, pkg) ? "err:cancelled" : "ok:";
+        outcome.done.countDown();
+    }
+
+    private static boolean isInstalled(Context context, String pkg) {
+        try {
+            context.getPackageManager().getPackageInfo(pkg, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    /** "ok:top,bottom,left,right": the system bars' and cut-outs' size in pixels. */
+    public static String insets(Context context) {
+        Activity a = MainActivity.current;
+        if (a == null) {
+            return "ok:0,0,0,0";
+        }
+        try {
+            WindowInsets wi = a.getWindow().getDecorView().getRootWindowInsets();
+            if (wi == null) {
+                return "ok:0,0,0,0";
+            }
+            if (Build.VERSION.SDK_INT >= 30) {
+                Insets i = wi.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+                return "ok:" + i.top + "," + i.bottom + "," + i.left + "," + i.right;
+            }
+            return "ok:" + wi.getSystemWindowInsetTop() + "," + wi.getSystemWindowInsetBottom() + "," + wi.getSystemWindowInsetLeft()
+                    + "," + wi.getSystemWindowInsetRight();
         } catch (RuntimeException e) {
             return "err:" + e;
         }

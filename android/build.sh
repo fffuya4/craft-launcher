@@ -22,7 +22,10 @@ android_jar="$ANDROID_HOME/platforms/android-$platform/android.jar"
 
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$root/Cargo.toml" | head -1)"
 IFS=. read -r major minor patch <<<"${version%%-*}"
-version_code=$((major * 10000 + minor * 100 + patch))
+revision="$(tr -dc 0-9 <"$here/PORT_REVISION")"
+# Android only installs an update with a higher version code: the port revision counts too.
+version_code=$(((major * 10000 + minor * 100 + patch) * 100 + ${revision:-1}))
+version_name="$version (port revision ${revision:-1})"
 
 rm -rf "$out"; mkdir -p "$out"/{classes,dex,res,apk}
 
@@ -36,10 +39,10 @@ javac -source 8 -target 8 -Xlint:-options -cp "$android_jar" -d "$out/classes" "
 "$bt/d8" --release --min-api "$min_sdk" --lib "$android_jar" --output "$out/dex" "$out"/classes/ai/storyteller/artcraft/launcher/*.class
 
 echo "== resources and manifest"
-sed -e "s/@VERSION_CODE@/$version_code/" -e "s/@VERSION_NAME@/$version/" "$here/AndroidManifest.xml" >"$out/AndroidManifest.xml"
+sed -e "s/@VERSION_CODE@/$version_code/" -e "s/@VERSION_NAME@/$version_name/" "$here/AndroidManifest.xml" >"$out/AndroidManifest.xml"
 "$bt/aapt2" compile --dir "$here/res" -o "$out/res.zip"
 "$bt/aapt2" link -o "$out/base.apk" -I "$android_jar" --manifest "$out/AndroidManifest.xml" \
-  --min-sdk-version "$min_sdk" --target-sdk-version 34 --version-code "$version_code" --version-name "$version" "$out/res.zip"
+  --min-sdk-version "$min_sdk" --target-sdk-version 34 --version-code "$version_code" --version-name "$version_name" "$out/res.zip"
 
 echo "== package"
 cp "$out/dex/classes.dex" "$out/apk/"

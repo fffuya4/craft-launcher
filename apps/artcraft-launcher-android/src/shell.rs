@@ -4,7 +4,7 @@ use android_activity::AndroidApp;
 use artcraft_launcher_core::PackageKind;
 use artcraft_launcher_core::protocol::Backend;
 use artcraft_launcher_native::{NativeBackend, android, paths};
-use artcraft_launcher_ui_egui::{Host, LauncherUi, Settings, TitleBar};
+use artcraft_launcher_ui_egui::{Host, LauncherUi, PortInfo, Settings, TitleBar};
 
 use crate::jni_bridge::JniBridge;
 
@@ -33,6 +33,8 @@ impl Host for AndroidHost {
 struct Shell {
     ui: LauncherUi,
     host: AndroidHost,
+    /// The system bars' and cut-outs' size in points: top, bottom, left, right.
+    insets: [f32; 4],
 }
 
 impl Shell {
@@ -41,12 +43,17 @@ impl Shell {
         let backend: Box<dyn Backend> = Box::new(NativeBackend::new(move || ctx.request_repaint()));
         let mut ui = LauncherUi::new(&cc.egui_ctx, backend, Settings::default());
         ui.attach(&cc.egui_ctx);
-        Self { ui, host: AndroidHost { quit: false } }
+        ui.set_port(Some(PortInfo { system: "Android".into(), report_url: android::PORT_ISSUES_URL.into() }));
+        Self { ui, host: AndroidHost { quit: false }, insets: [0.0; 4] }
     }
 }
 
 impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.cumulative_frame_nr() % 30 == 0 {
+            let scale = ctx.pixels_per_point().max(0.1);
+            self.insets = android::insets_px().map(|px| px / scale);
+        }
         self.ui.logic(ctx, &mut self.host);
         if std::mem::take(&mut self.host.quit) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -55,8 +62,9 @@ impl eframe::App for Shell {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Keep the interface clear of the status bar, the navigation bar and a camera cut-out.
-        let inset = ui.ctx().input(|i| i.safe_area_insets());
-        let area = ui.max_rect() - inset;
+        let [top, bottom, left, right] = self.insets;
+        let full = ui.max_rect();
+        let area = egui::Rect::from_min_max(full.min + egui::vec2(left, top), full.max - egui::vec2(right, bottom));
         let mut inner = ui.new_child(egui::UiBuilder::new().max_rect(area));
         self.ui.ui(&mut inner, &mut self.host);
     }

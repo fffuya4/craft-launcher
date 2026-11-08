@@ -125,4 +125,13 @@ impl Bridge for JniBridge {
     fn launch(&self, package: &str) -> Result<(), String> {
         self.ok("launch", &[package]).map(drop)
     }
+
+    fn insets_px(&self) -> [f32; 4] {
+        let Ok(text) = self.ok("insets", &[]) else { return [0.0; 4] };
+        let px: Vec<f32> = text.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+        match px[..] {
+            [top, bottom, left, right] => [top, bottom, left, right],
+            _ => [0.0; 4],
+        }
+    }
 }

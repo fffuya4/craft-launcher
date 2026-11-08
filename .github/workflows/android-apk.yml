@@ -1,6 +1,6 @@
 # Builds the Android APK of ArtCraft Launcher. For a fork: Actions → "Android APK" → Run workflow.
-# With "Publish" ticked (the default) the APK is also published as a release of this fork.
-# (Upstream CI is shared; this file isn't part of that.)
+# With "Publish" ticked (the default) the APK is also published as a release of this fork, tagged
+# android-v<original version>-r<port revision>. (Upstream CI is shared; this file isn't part of that.)
 name: Android APK
 permissions:
   contents: write
@@ -11,8 +11,6 @@ on:
         description: "Publish the APK as a release of this fork"
         type: boolean
         default: true
-  push:
-    tags: ["android-v*"]
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -44,9 +42,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          revision="$(tr -dc 0-9 < android/PORT_REVISION)"
+          tag="android-v${version}-r${revision}"
           cd android/build
           apk="artcraft-launcher-$version-android-arm64.apk"
           sha256sum "$apk" > SHA256SUMS.txt
-          gh release create "v$version" "$apk" SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" \
-            --title "ArtCraft Launcher $version (Android)" --notes "Android build of ArtCraft Launcher $version." \
-            || gh release upload "v$version" "$apk" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+          gh release create "$tag" "$apk" SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" \
+            --title "ArtCraft Launcher for Android $version (port revision $revision)" \
+            --notes "Android port of ArtCraft Launcher $version, port revision $revision." \
+            || gh release upload "$tag" "$apk" SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
