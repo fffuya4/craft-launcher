@@ -148,7 +148,7 @@ const fn app(
 
 /// The Craft App Suite, in display order matching getartcraft.com, then the community apps:
 pub const SUITE: [CraftApp; 17] = [
-    app("photocraft", "PhotoCraft", "Image editing", [[0x2f, 0x7b, 0xf5], [0x1a, 0x5b, 0xc4], [0x7f, 0xb0, 0xff]], "storytold/photocraft"),
+    app("photocraft", "PhotoCraft", "Image editing", [[0x2f, 0x7b, 0xf5], [0x1a, 0x5b, 0xc4], [0x7f, 0xb0, 0xff]], "fffuya4/photocraft-android"),
     app("vectorcraft", "VectorCraft", "Vector illustration", [[0xe8, 0x57, 0x3f], [0xb8, 0x3a, 0x24], [0xff, 0x8a, 0x70]], "fffuya4/vectorcraft-android"),
     app(
         "filmcraft",
@@ -356,8 +356,9 @@ mod tests {
             // `Craft Anything` is `craft-anything`.
             assert_eq!(a.name.to_lowercase().replace(' ', "-"), a.id);
             match a.kind {
-                // This fork installs VectorCraft's Android build from the fork's own releases.
+                // This port installs the Android builds of these apps from the port's own releases.
                 AppKind::Official if a.id == "vectorcraft" => assert_eq!(a.repo, "fffuya4/vectorcraft-android"),
+                AppKind::Official if a.id == "photocraft" => assert_eq!(a.repo, "fffuya4/photocraft-android"),
                 AppKind::Official => assert_eq!(a.repo, format!("storytold/{}", a.id)),
                 AppKind::Community => assert!(!a.repo.starts_with("storytold/"), "{} is community", a.id),
             }

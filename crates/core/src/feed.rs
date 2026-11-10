@@ -476,8 +476,14 @@ mod tests {
         )
     }
 
+    /// The app as the original suite has it. This port's catalog installs PhotoCraft from the
+    /// port's own repository, but the feed under test describes the original's.
     fn app(id: &str) -> &'static CraftApp {
-        CraftApp::by_id(id).unwrap()
+        let mut app = *CraftApp::by_id(id).unwrap();
+        if id == "photocraft" {
+            app.repo = "storytold/photocraft";
+        }
+        Box::leak(Box::new(app))
     }
 
     #[test]
